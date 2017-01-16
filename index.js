@@ -34,7 +34,6 @@ function SendCampaign(campaign_id) {
     method: 'POST',
     auth: 'anyuser:' + process.env.APIKEY,
   };
-
   const req = https.request(options, (res) => { });
   req.end();
 }
@@ -63,6 +62,7 @@ function UpdateCampaign(campaign_id) {
   const req = https.request(options, (res) => {
     let updated_body = '';
     res.setEncoding('utf8');
+    res.on('data', (chunk) => updated_body += chunk);
     res.on('end', () => {
       SendCampaign(campaign_id);
     });
@@ -103,12 +103,9 @@ function CreateCampaign(event, callback) {
 
     const req = https.request(options, (res) => {
         let created_body = '';
-        console.log('Status:', res.statusCode);
-        console.log('Headers:', JSON.stringify(res.headers));
         res.setEncoding('utf8');
         res.on('data', (chunk) => created_body += chunk);
         res.on('end', () => {
-            console.log('Successfully processed HTTPS response');
             if (res.headers['content-type'] === 'application/json; charset=utf-8') {
                 console.log("It's JSON");
                 created_body = JSON.parse(created_body);

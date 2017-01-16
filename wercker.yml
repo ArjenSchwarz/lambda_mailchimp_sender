@@ -1,4 +1,4 @@
-box: ubuntu
+box: golang
 build:
   steps:
     - install-packages:

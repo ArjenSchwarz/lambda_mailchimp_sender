@@ -1,0 +1,26 @@
+box: debian
+build:
+  steps:
+    - install-packages:
+        packages: zip
+    # We zip up all the files needed for deploying to Lambda.
+    # This then needs to be copied to the original source dir
+    # to ensure it's present in the deploy step
+    - script:
+        name: create zip file
+        code: |
+          zip -r $WERCKER_OUTPUT_DIR/mailchimp.zip index.js
+
+deploy:
+  steps:
+    - tcnksm/ghr:
+      token: $GITHUB_TOKEN
+      input: $WERCKER_SOURCE_DIR/mailchimp.zip
+      version: latest
+      replace: true
+  lambda:
+    - arjen/lambda:
+        access_key: $AWS_ACCESS_KEY
+        secret_key: $AWS_SECRET_KEY
+        function_name: MailchimpSender
+        filepath: $WERCKER_SOURCE_DIR/mailchimp.zip

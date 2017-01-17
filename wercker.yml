@@ -22,5 +22,5 @@ deploy:
     - arjen/lambda:
         access_key: $AWS_ACCESS_KEY
         secret_key: $AWS_SECRET_KEY
-        function_name: MailchimpSender
+        function_name: mailchimpsender
         filepath: $WERCKER_SOURCE_DIR/mailchimp.zip

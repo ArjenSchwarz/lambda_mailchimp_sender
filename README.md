@@ -20,14 +20,20 @@ The code for the function is simple, and has no external dependencies so you can
 
 The function uses environment variables for the details, you will have to add these to your Lambda function's configuration.
 
-* APIKEY: Your mailchimp API key
+* APIKEY: Your Mailchimp API key
 * HOSTNAME: The hostname where your API calls should go to (in the form usX.api.mailchimp.com, where usX is the endpart of your API key)
 * TEMPLATE_ID: The ID of the template you want to assign to the campaign
 * LIST_ID: The ID of the recipients list
 * SENDER_NAME: The name of the sender of your campaign
 * REPLY_TO: The reply-to address of your campaign
+* TOKEN: A security token that needs to be provided (and matched) by the trigger. This is a security measure to prevent accidental or unauthorised use.
 
-Additionally, it will check `event.title` for the title/subject of the campaign so this needs to be provided as a json object.
+### Trigger
+
+The trigger will need to send 2 things to the mailsender:
+
+* title: The title/subject of the campaign
+* token: A security token that needs to match the value in the
 
 ## About the code
 

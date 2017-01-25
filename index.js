@@ -120,5 +120,7 @@ function CreateCampaign(event, callback) {
 }
 
 exports.handler = (event, context, callback) => {
-  CreateCampaign(event, callback);
+  if (process.env.TOKEN !== "" && event.token == process.env.TOKEN) {
+    CreateCampaign(event, callback);
+  }
 };

@@ -1,4 +1,4 @@
-box: golang
+box: node:24
 build:
   steps:
     - install-packages:
@@ -9,18 +9,26 @@ build:
     - script:
         name: create zip file
         code: |
-          zip -r $WERCKER_OUTPUT_DIR/mailchimp.zip index.js
+          npm ci --omit=dev --ignore-scripts
+          zip -r $WERCKER_OUTPUT_DIR/mailchimp.zip index.js package.json package-lock.json node_modules
 
 deploy:
   steps:
     - tcnksm/ghr:
-      token: $GITHUB_TOKEN
-      input: $WERCKER_SOURCE_DIR/mailchimp.zip
-      version: latest
-      replace: true
+        token: $GITHUB_TOKEN
+        input: $WERCKER_SOURCE_DIR/mailchimp.zip
+        version: node24
+        replace: true
   lambda:
+    - script:
+        name: require coordinated owner rollout
+        code: |
+          if [ "${MAILCHIMP_COORDINATED_DEPLOY:-false}" != "true" ]; then
+            echo "Deployment disabled: owner must coordinate runtime, secret, claims table, IAM and publisher cutover first."
+            exit 1
+          fi
     - arjen/lambda:
-        access_key: $AWS_ACCESS_KEY
-        secret_key: $AWS_SECRET_KEY
-        function_name: mailchimpsender
-        filepath: $WERCKER_SOURCE_DIR/mailchimp.zip
+          access_key: $AWS_ACCESS_KEY
+          secret_key: $AWS_SECRET_KEY
+          function_name: mailchimpsender
+          filepath: $WERCKER_SOURCE_DIR/mailchimp.zip

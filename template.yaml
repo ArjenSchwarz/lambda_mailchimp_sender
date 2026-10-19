@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Mailchimp sender with runtime secret retrieval and durable duplicate protection
+Parameters:
+  SecretArn:
+    Type: String
+    Description: Existing same-region Secrets Manager secret ARN containing apiKey and token
+    AllowedPattern: 'arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+'
+  SecretKmsKeyArn:
+    Type: String
+    Default: ''
+    Description: Existing customer-managed key ARN, only if the secret uses one
+    AllowedPattern: '(^$|arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+)'
+  MailchimpHostname:
+    Type: String
+    AllowedPattern: 'us[0-9]+\.api\.mailchimp\.com'
+  ListId:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+  TemplateId:
+    Type: String
+    AllowedPattern: '[1-9][0-9]*'
+  SenderName:
+    Type: String
+    MinLength: 1
+  ReplyTo:
+    Type: String
+    MinLength: 1
+  SendEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+Conditions:
+  CustomerManagedSecretKey: !Not [!Equals [!Ref SecretKmsKeyArn, '']]
+Resources:
+  Claims:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+  SenderLogs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 30
+  SenderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SenderResources
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref SecretArn
+                - Effect: Allow
+                  Action: [dynamodb:PutItem, dynamodb:UpdateItem]
+                  Resource: !GetAtt Claims.Arn
+                - Effect: Allow
+                  Action: [logs:CreateLogStream, logs:PutLogEvents]
+                  Resource: !GetAtt SenderLogs.Arn
+                - !If
+                  - CustomerManagedSecretKey
+                  - Effect: Allow
+                    Action: kms:Decrypt
+                    Resource: !Ref SecretKmsKeyArn
+                    Condition:
+                      StringEquals:
+                        kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
+                        'kms:EncryptionContext:SecretARN': !Ref SecretArn
+                  - !Ref AWS::NoValue
+  Sender:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: index.handler
+      Runtime: nodejs24.x
+      Architectures: [x86_64]
+      MemorySize: 128
+      Timeout: 60
+      LoggingConfig:
+        LogFormat: JSON
+        LogGroup: !Ref SenderLogs
+      Environment:
+        Variables:
+          SECRET_ARN: !Ref SecretArn
+          IDEMPOTENCY_TABLE: !Ref Claims
+          HOSTNAME: !Ref MailchimpHostname
+          LIST_ID: !Ref ListId
+          TEMPLATE_ID: !Ref TemplateId
+          SENDER_NAME: !Ref SenderName
+          REPLY_TO: !Ref ReplyTo
+          SEND_ENABLED: !Ref SendEnabled
+      Role: !GetAtt SenderRole.Arn
+      Events:
+        SendCampaign:
+          Type: Api
+          Properties:
+            Method: POST
+            Path: /mailchimpsender
+Outputs:
+  FunctionArn:
+    Value: !GetAtt Sender.Arn
+  ClaimsTable:
+    Value: !Ref Claims
+  Endpoint:
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/mailchimpsender'

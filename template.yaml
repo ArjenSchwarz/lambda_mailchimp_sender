@@ -1,16 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Mailchimp sender with runtime secret retrieval and durable duplicate protection
+Description: Mailchimp sender with runtime SecureString parameter retrieval and durable duplicate protection
 Parameters:
-  SecretArn:
+  ApiKeyParameterName:
     Type: String
-    Description: Existing same-region Secrets Manager secret ARN containing apiKey and token
-    AllowedPattern: 'arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+'
-  SecretKmsKeyArn:
+    Default: /mailchimpsender/api-key
+    Description: Existing standard SecureString parameter using default aws/ssm key
+    AllowedPattern: '/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*'
+  TokenParameterName:
     Type: String
-    Default: ''
-    Description: Existing customer-managed key ARN, only if the secret uses one
-    AllowedPattern: '(^$|arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+)'
+    Default: /mailchimpsender/token
+    Description: Existing standard SecureString parameter using default aws/ssm key
+    AllowedPattern: '/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*'
   MailchimpHostname:
     Type: String
     AllowedPattern: 'us[0-9]+\.api\.mailchimp\.com'
@@ -31,8 +32,6 @@ Parameters:
     Type: String
     Default: 'false'
     AllowedValues: ['false', 'true']
-Conditions:
-  CustomerManagedSecretKey: !Not [!Equals [!Ref SecretKmsKeyArn, '']]
 Resources:
   Claims:
     Type: AWS::DynamoDB::Table
@@ -72,24 +71,16 @@ Resources:
             Version: '2012-10-17'
             Statement:
                 - Effect: Allow
-                  Action: secretsmanager:GetSecretValue
-                  Resource: !Ref SecretArn
+                  Action: ssm:GetParameters
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParameterName}'
+                    - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TokenParameterName}'
                 - Effect: Allow
                   Action: [dynamodb:PutItem, dynamodb:UpdateItem]
                   Resource: !GetAtt Claims.Arn
                 - Effect: Allow
                   Action: [logs:CreateLogStream, logs:PutLogEvents]
                   Resource: !GetAtt SenderLogs.Arn
-                - !If
-                  - CustomerManagedSecretKey
-                  - Effect: Allow
-                    Action: kms:Decrypt
-                    Resource: !Ref SecretKmsKeyArn
-                    Condition:
-                      StringEquals:
-                        kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
-                        'kms:EncryptionContext:SecretARN': !Ref SecretArn
-                  - !Ref AWS::NoValue
   Sender:
     Type: AWS::Serverless::Function
     Properties:
@@ -104,7 +95,8 @@ Resources:
         LogGroup: !Ref SenderLogs
       Environment:
         Variables:
-          SECRET_ARN: !Ref SecretArn
+          API_KEY_PARAMETER_NAME: !Ref ApiKeyParameterName
+          TOKEN_PARAMETER_NAME: !Ref TokenParameterName
           IDEMPOTENCY_TABLE: !Ref Claims
           HOSTNAME: !Ref MailchimpHostname
           LIST_ID: !Ref ListId

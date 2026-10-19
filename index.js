@@ -1,7 +1,7 @@
 'use strict';
 
 const { createHash, timingSafeEqual } = require('node:crypto');
-const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+const { SSMClient, GetParametersCommand } = require('@aws-sdk/client-ssm');
 const { DynamoDBClient, PutItemCommand, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
 
 class RequestError extends Error {
@@ -35,7 +35,10 @@ function parseEvent(event) {
 }
 
 function validateConfig(env) {
-  if (!env.SECRET_ARN || !env.IDEMPOTENCY_TABLE || !env.LIST_ID ||
+  const parameterName = /^\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+  if (!parameterName.test(env.API_KEY_PARAMETER_NAME || '') ||
+      !parameterName.test(env.TOKEN_PARAMETER_NAME || '') ||
+      env.API_KEY_PARAMETER_NAME === env.TOKEN_PARAMETER_NAME || !env.IDEMPOTENCY_TABLE || !env.LIST_ID ||
       !env.SENDER_NAME || !env.REPLY_TO || !/^[1-9]\d*$/.test(env.TEMPLATE_ID || '') ||
       !Number.isSafeInteger(Number(env.TEMPLATE_ID)) ||
       !/^us\d+\.api\.mailchimp\.com$/.test(env.HOSTNAME || '')) {
@@ -45,19 +48,33 @@ function validateConfig(env) {
 
 // Factories allow tests to replace every network boundary. No request bodies or
 // upstream error details are ever logged or returned to API callers.
-function createHandler({ env = process.env, secrets, database, fetchImpl = fetch, now = Date.now } = {}) {
-  secrets ||= new SecretsManagerClient({ maxAttempts: 2 });
+function createHandler({ env = process.env, parameters, database, fetchImpl = fetch, now = Date.now } = {}) {
+  parameters ||= new SSMClient({ maxAttempts: 2 });
   database ||= new DynamoDBClient({ maxAttempts: 2 });
   let cached;
   async function credentials() {
     if (cached && now() < cached.until) return cached.value;
-    const result = await secrets.send(new GetSecretValueCommand({ SecretId: env.SECRET_ARN, VersionStage: 'AWSCURRENT' }),
+    const names = [env.API_KEY_PARAMETER_NAME, env.TOKEN_PARAMETER_NAME];
+    const result = await parameters.send(new GetParametersCommand({ Names: names, WithDecryption: true }),
       { abortSignal: AbortSignal.timeout(3000) });
-    const value = JSON.parse(result.SecretString);
+    if (result.InvalidParameters?.length || !Array.isArray(result.Parameters) || result.Parameters.length !== 2) {
+      throw new Error('Incomplete credential parameters');
+    }
+    // SSM returns results in alphabetical order, not request order. Validate and
+    // cache the complete pair only; a partial refresh must never reuse old values.
+    const values = new Map();
+    for (const parameter of result.Parameters) {
+      if (!names.includes(parameter.Name) || values.has(parameter.Name) ||
+          parameter.Type !== 'SecureString' || typeof parameter.Value !== 'string') {
+        throw new Error('Invalid credential parameters');
+      }
+      values.set(parameter.Name, parameter.Value);
+    }
+    const value = { apiKey: values.get(env.API_KEY_PARAMETER_NAME), token: values.get(env.TOKEN_PARAMETER_NAME) };
     const region = env.HOSTNAME.split('.')[0];
     if (typeof value.apiKey !== 'string' || !value.apiKey.endsWith(`-${region}`) ||
         value.apiKey.length < region.length + 2 || typeof value.token !== 'string' ||
-        !value.token.trim() || value.token.length > 4096) throw new Error('Invalid secret');
+        !value.token.trim() || value.token.length > 4096) throw new Error('Invalid credential parameters');
     cached = { value, until: now() + 60000 };
     return value;
   }

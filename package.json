@@ -6,6 +6,6 @@
   "scripts": {"test": "node --test", "check": "node --check index.js && node --check test/handler.test.js"},
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1152.0",
-    "@aws-sdk/client-secrets-manager": "3.1152.0"
+    "@aws-sdk/client-ssm": "3.1152.0"
   }
 }

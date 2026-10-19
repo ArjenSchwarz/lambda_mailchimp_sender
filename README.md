@@ -22,7 +22,7 @@ unless that separate rollout has been completed. No release or deployment was
 performed for this update.
 
 Node 24 is the latest generally available Lambda Node LTS runtime as checked on
-2026-10-19; AWS lists Node 26 as preview. AWS SDK v3 Secrets Manager and DynamoDB
+2026-10-19; AWS lists Node 26 as preview. AWS SDK v3 SSM and DynamoDB
 clients are pinned to 3.1152.0 with a lockfile (their engines require Node >=20).
 No Mailchimp SDK is needed: Node's built-in fetch calls the existing API v3 paths.
 
@@ -48,51 +48,66 @@ Existing custom API response mappings may mask status codes; review at cutover.
 
 ## Credentials and permissions
 
-An owner must supply a **same-account, same-region Secrets Manager secret ARN**
-whose JSON string contains fields `apiKey` and `token`. Create and populate a
-secret through your secure process if no compatible one is available, or
-explicitly select a suitable existing secret. **No suitable secret has been
-verified to exist.** The secret must exist before stack deployment; this does
-not require creating a new Mailchimp API key or publisher token merely to store
-currently valid owner-managed credentials. No actual values belong in this repository, shell arguments, deployment
-parameters, logs, or test events. This stack never creates a secret or credential.
-Only the secret ARN is placed in the function environment. The token must be
-nonempty; the API key's data-center suffix must match `MailchimpHostname`.
+The owner must create/select two **same-account, same-region standard-tier
+SecureString parameters**, each encrypted with the default AWS-managed `aws/ssm`
+key. No suitable parameters have been verified to exist, and this stack creates
+neither parameters nor credentials. Existing valid owner-managed Mailchimp/API
+credentials can be stored; new credentials are not inherently required.
 
-Secrets Manager keeps the related credentials together and supports version stages
-for coordinated replacement. SSM SecureString would also work for this small
-workload, with equivalent custom runtime retrieval and rotation handling. It is
-not less secure merely because it is cheaper. The choice here is Secrets Manager
-for explicit AWSCURRENT version promotion and coordinated credential replacement,
-not automatic Mailchimp rotation. AWS's published examples price Secrets Manager
-at $0.40 per secret/month plus $0.05 per 10,000 API calls; one combined secret is
-about $0.40/month before usage, taxes, any KMS and other service charges. Standard
-SSM parameters at standard throughput have no additional parameter/API charge
-(KMS charges may still apply). For infrequent article publishing, fixed storage
-cost dominates; SSM would be the lower-cost valid alternative if those version
-stages are not useful. This implementation selects Secrets Manager rather than
-provisioning both alternatives. Review current region pricing before rollout.
-We deliberately do not resolve secrets into Lambda environment variables through
-CloudFormation dynamic references: those are resolved during resource updates,
-not refreshed merely because the secret changed.
+| Parameter name (default) | Value stored by owner | SAM parameter / function environment |
+| --- | --- | --- |
+| `/mailchimpsender/api-key` | Mailchimp API key as a raw string | `ApiKeyParameterName` / `API_KEY_PARAMETER_NAME` |
+| `/mailchimpsender/token` | Publisher authentication token as a raw string | `TokenParameterName` / `TOKEN_PARAMETER_NAME` |
 
-The handler retrieves `AWSCURRENT`, validates it, and caches it in memory for at
-most 60 seconds per warm execution environment. Failed refreshes fail closed,
-without using stale credentials. Owner-managed rotation must coordinate the
-Mailchimp key and publisher token, allowing for this cache interval before
-revoking old credentials. There is no automatic Mailchimp rotation provisioned,
-no fallback to AWSPREVIOUS, and no retry of failed Mailchimp writes. For urgent
-revocation, owner-managed disabling of sending is necessary; a cache cannot
-provide immediate global revocation.
+These are two individual raw string values, **not JSON objects**. Both parameter
+names must be distinct absolute paths. The API key suffix must match
+`MailchimpHostname`; the token must be nonempty. Each standard parameter is
+limited to 4 KiB. Keep actual values out of this repository, shell arguments,
+deployment inputs, logs and test events. Only the two names enter Lambda's
+environment; IAM ARNs are derived using the deployment account and region.
 
-The explicit runtime role permits only GetSecretValue on the given secret,
-PutItem/UpdateItem on the claims table, and log stream creation/writes on this
-stack's log group. It cannot create/update/list secrets, enumerate tables, or
-delete claims. If the secret uses a customer-managed KMS key, supply its ARN:
-the optional decrypt grant is restricted to that key, Secrets Manager service,
-and the secret encryption context. The owner must ensure its key policy permits
-the runtime role. The default Secrets Manager AWS-managed key needs no extra
-decrypt statement. This is a proposed role only; no IAM changes were applied.
+Owner setup (not performed): in the intended account/region, use the Systems
+Manager Parameter Store console or your secure credential-management workflow.
+For each name above, select **Standard**, type **SecureString**, and the default
+KMS key **`alias/aws/ssm`**. Enter its raw value privately and save. Do not select
+Advanced, a customer-managed key, or a Secrets Manager reference path. Before
+rollout, verify both names, type, tier and key privately; the handler validates
+the returned type and values, but GetParameters does not report tier or key ID.
+If selecting other absolute paths, pass those exact names as the SAM inputs.
+The function needs no create/update permissions, and setup must be completed by
+the owner before any deployment or activation.
+
+The handler makes one `GetParameters` call with the two exact names and
+`WithDecryption: true`, validates both results by name and `SecureString` type,
+then caches the complete pair for at most 60 seconds per warm execution
+environment. Partial results, invalid types/values, denied reads and failed
+refreshes fail closed; expired values are never reused. It reads the latest
+values rather than version labels. Two parameters can be updated independently,
+so retrieval is **not an atomic credential-pair rotation**. To rotate, pause
+publishing and disable sending, update both parameters and the publisher through
+your secure process, allow at least the cache interval to expire, then coordinate
+re-enabling. There is no automatic Mailchimp rotation, stale fallback, or retry
+of failed Mailchimp writes. A cache cannot provide immediate global revocation.
+
+The explicit runtime role allows only `ssm:GetParameters` on the two exact
+parameter ARNs, PutItem/UpdateItem on the claims table, and stream creation/writes
+on this stack's log group. It has no GetParametersByPath, GetParameterHistory,
+parameter creation/update, Secrets Manager access, table enumeration or claim
+deletion permission. The default `aws/ssm` key grants decrypt permission to IAM
+principals within the account, so this template adds **no KMS permission** and
+creates no KMS key. SSM read permissions remain the access boundary here; the
+default key does not provide per-parameter key-policy isolation. Existing explicit
+denies or organization controls can still block retrieval. No IAM or key-policy
+changes were applied. Customer-managed keys are outside this design.
+
+Standard parameters and standard-throughput Parameter Store API calls have no
+additional Parameter Store charge. There is no Secrets Manager resource or
+per-secret storage charge, and no customer-managed key storage charge. AWS KMS
+usage charges can still apply; this is not a claim that the whole application is
+free. Existing Lambda/API/logging and retained DynamoDB/backup charges remain.
+Keep standard tier and standard throughput rather than enabling chargeable
+advanced/high-throughput features for this infrequent workload.
+
 List ID is audience metadata, not a credential, and remains an owner-supplied
 NoEcho deployment parameter. Sender details and template ID are configuration.
 
@@ -149,7 +164,8 @@ history; preserve the table and migrate claims before switching stacks.
    retries, and all callers of `$LATEST`, versions 1/2, stage snapshots or cached
    URLs. Do not delete old versions merely because no aliases exist. Preserve any
    external API authorization/domain/usage-plan configuration during migration.
-3. Through your secure process create/select the secret and supply its ARN,
+3. Through your secure process create/select the two standard SecureString
+   parameters with the default `aws/ssm` key, and supply their exact names,
    Mailchimp hostname, list ID, template ID, sender name and reply address. Check
    existing values privately; placeholders in the export cannot be deployed.
    Review retained logs, backups and policies; avoid API execution data tracing
@@ -159,11 +175,11 @@ history; preserve the table and migrate claims before switching stacks.
    does not import or overwrite the existing standalone Lambda/API. Plan explicit
    CloudFormation adoption if desired, or a parallel migration. No FunctionName
    is hardcoded to collide with the current function. Review the change set,
-   cost, retention and optional KMS grants yourself before any deployment.
+   cost, retention and scoped SSM access yourself before any deployment.
 5. Keep `SendEnabled=false` initially. Build the Node 24/Linux artifact, validate
    the template and inspect the resulting package. A disabled handler returns
    503 after credential validation without a campaign write. This update's
-   verification uses mocks only; it did not read secret values or invoke AWS.
+   verification uses mocks only; it did not read parameter values or invoke AWS.
 6. Pause the publisher and drain retries before switching the endpoint/integration.
    Prevent both old and new senders from processing the same article: the old
    implementation does not share the claims table. Preserve old custom mappings
@@ -181,11 +197,11 @@ history; preserve the table and migrate claims before switching stacks.
 
 - [AWS Lambda supported runtimes](https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html)
 - [AWS Node deployment packages and bundled SDK guidance](https://docs.aws.amazon.com/lambda/latest/dg/nodejs-package.html)
-- [GetSecretValue permissions, caching and version stages](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html)
-- [CloudFormation secret reference refresh behavior](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html)
+- [SSM GetParameters and response ordering](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameters.html)
+- [SecureString encryption and default key](https://docs.aws.amazon.com/systems-manager/latest/userguide/secure-string-parameter-kms-encryption.html)
+- [Default aws/ssm decrypt permissions](https://docs.aws.amazon.com/systems-manager/latest/userguide/ps-restrict-decryption.html)
 - [DynamoDB conditional writes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html)
 - [Mailchimp send campaign API](https://mailchimp.com/developer/marketing/api/campaigns/create-action-send)
-- [Secrets Manager pricing](https://aws.amazon.com/secrets-manager/pricing/)
 - [Systems Manager Parameter Store pricing](https://aws.amazon.com/systems-manager/pricing/)
-- [AWS SDK Secrets Manager package](https://www.npmjs.com/package/@aws-sdk/client-secrets-manager)
+- [AWS SDK SSM package](https://www.npmjs.com/package/@aws-sdk/client-ssm)
 - [AWS SDK DynamoDB package](https://www.npmjs.com/package/@aws-sdk/client-dynamodb)

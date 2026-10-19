@@ -24,7 +24,7 @@ deploy:
         name: require coordinated owner rollout
         code: |
           if [ "${MAILCHIMP_COORDINATED_DEPLOY:-false}" != "true" ]; then
-            echo "Deployment disabled: owner must coordinate runtime, secret, claims table, IAM and publisher cutover first."
+            echo "Deployment disabled: owner must coordinate runtime, SecureString parameters, claims table, IAM and publisher cutover first."
             exit 1
           fi
     - arjen/lambda:

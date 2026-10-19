@@ -2,13 +2,17 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHandler } = require('../index');
-const env = { SECRET_ARN: 'synthetic', IDEMPOTENCY_TABLE: 'test', HOSTNAME: 'us1.api.mailchimp.com', LIST_ID: 'synthetic-list', TEMPLATE_ID: '123', SENDER_NAME: 'Test', REPLY_TO: 'test@example.invalid', SEND_ENABLED: 'true' };
+const env = { API_KEY_PARAMETER_NAME: '/test/api-key', TOKEN_PARAMETER_NAME: '/test/token', IDEMPOTENCY_TABLE: 'test', HOSTNAME: 'us1.api.mailchimp.com', LIST_ID: 'synthetic-list', TEMPLATE_ID: '123', SENDER_NAME: 'Test', REPLY_TO: 'test@example.invalid', SEND_ENABLED: 'true' };
+const parameterResult = (apiKey = 'synthetic-us1', token = 'synthetic-token') => ({ Parameters: [
+  { Name: env.TOKEN_PARAMETER_NAME, Type: 'SecureString', Value: token },
+  { Name: env.API_KEY_PARAMETER_NAME, Type: 'SecureString', Value: apiKey },
+] });
 const event = { title: 'Synthetic test', token: 'synthetic-token', id: 'article-1' };
 function fixture(options = {}) {
   const calls = [], claims = new Set(), records = [];
-  let secretReads = 0, clock = 0;
+  let parameterReads = 0, clock = 0;
   const handler = createHandler({ env: { ...env, ...options.env }, now: () => clock,
-    secrets: { send: async () => { secretReads++; return { SecretString: JSON.stringify({ apiKey: 'synthetic-us1', token: 'synthetic-token' }) }; } },
+    parameters: { send: async () => { parameterReads++; return parameterResult(); } },
     database: { send: async command => {
       const data = command.input;
       if (command.constructor.name === 'PutItemCommand') {
@@ -23,7 +27,7 @@ function fixture(options = {}) {
       return { ok: options.failAt !== calls.length, json: async () => options.invalidId ? {} : { id: 'campaign-1' }, text: async () => '' };
     },
   });
-  return { handler, calls, records, tick: n => { clock += n; }, reads: () => secretReads };
+  return { handler, calls, records, tick: n => { clock += n; }, reads: () => parameterReads };
 }
 test('awaits create, content, send and keeps the original campaign settings', async () => {
   const f = fixture();
@@ -86,7 +90,7 @@ test('invalid campaign response prevents content/send', async () => {
   assert.equal((await f.handler(event)).statusCode, 502);
   assert.equal(f.calls.length, 1);
 });
-test('secrets cache expires after 60 seconds', async () => {
+test('parameter cache expires after 60 seconds', async () => {
   const f = fixture();
   await f.handler({ ...event, token: 'wrong' });
   await f.handler({ ...event, token: 'wrong' });
@@ -95,14 +99,14 @@ test('secrets cache expires after 60 seconds', async () => {
   await f.handler({ ...event, token: 'wrong' });
   assert.equal(f.reads(), 2);
 });
-test('unreadable/malformed secrets fail closed before storage or Mailchimp', async () => {
-  for (const secrets of [
+test('unreadable/malformed parameters fail closed before storage or Mailchimp', async () => {
+  for (const parameters of [
     { send: async () => { throw new Error('sensitive upstream detail'); } },
-    { send: async () => ({ SecretString: '{' }) },
-    { send: async () => ({ SecretString: JSON.stringify({ apiKey: 'synthetic-us2', token: 'synthetic-token' }) }) },
+    { send: async () => ({ Parameters: [] }) },
+    { send: async () => parameterResult('synthetic-us2') },
   ]) {
     let writes = 0;
-    const handler = createHandler({ env, secrets,
+    const handler = createHandler({ env, parameters,
       database: { send: async () => { writes++; } },
       fetchImpl: async () => { throw new Error('must not call'); },
     });
@@ -115,7 +119,7 @@ test('unreadable/malformed secrets fail closed before storage or Mailchimp', asy
 test('claim/storage failures never start Mailchimp writes', async () => {
   let requests = 0;
   const handler = createHandler({ env,
-    secrets: { send: async () => ({ SecretString: JSON.stringify({ apiKey: 'synthetic-us1', token: 'synthetic-token' }) }) },
+    parameters: { send: async () => parameterResult() },
     database: { send: async () => { throw new Error('storage unavailable'); } },
     fetchImpl: async () => { requests++; },
   });
@@ -125,7 +129,7 @@ test('claim/storage failures never start Mailchimp writes', async () => {
 test('failure to persist campaign ID stops before content or send', async () => {
   let requests = 0;
   const handler = createHandler({ env,
-    secrets: { send: async () => ({ SecretString: JSON.stringify({ apiKey: 'synthetic-us1', token: 'synthetic-token' }) }) },
+    parameters: { send: async () => parameterResult() },
     database: { send: async command => { if (command.constructor.name === 'UpdateItemCommand') throw new Error('storage unavailable'); } },
     fetchImpl: async () => { requests++; return { ok: true, json: async () => ({ id: 'campaign-1' }) }; },
   });
@@ -136,7 +140,7 @@ for (const failedState of ['SEND_REQUESTED', 'SEND_ACCEPTED']) {
   test(`failed ${failedState} persistence retains the claim and cannot resend`, async () => {
     let claimed = false, requests = 0;
     const handler = createHandler({ env,
-      secrets: { send: async () => ({ SecretString: JSON.stringify({ apiKey: 'synthetic-us1', token: 'synthetic-token' }) }) },
+      parameters: { send: async () => parameterResult() },
       database: { send: async command => {
         if (command.constructor.name === 'PutItemCommand') {
           if (claimed) { const error = new Error(); error.name = 'ConditionalCheckFailedException'; throw error; }
@@ -156,7 +160,7 @@ for (const failedState of ['SEND_REQUESTED', 'SEND_ACCEPTED']) {
 test('uncertain persisted claim never starts a campaign and blocks subsequent retry', async () => {
   let claimed = false, requests = 0;
   const handler = createHandler({ env,
-    secrets: { send: async () => ({ SecretString: JSON.stringify({ apiKey: 'synthetic-us1', token: 'synthetic-token' }) }) },
+    parameters: { send: async () => parameterResult() },
     database: { send: async () => {
       if (!claimed) { claimed = true; throw new Error('response lost after durable write'); }
       const error = new Error(); error.name = 'ConditionalCheckFailedException'; throw error;
@@ -167,12 +171,12 @@ test('uncertain persisted claim never starts a campaign and blocks subsequent re
   assert.equal((await handler(event)).statusCode, 409);
   assert.equal(requests, 0);
 });
-test('expired cached secret is not used when refresh fails', async () => {
+test('expired cached parameters is not used when refresh fails', async () => {
   let clock = 0, reads = 0, requests = 0;
   const handler = createHandler({ env, now: () => clock,
-    secrets: { send: async () => {
-      if (++reads > 1) throw new Error('secret service unavailable');
-      return { SecretString: JSON.stringify({ apiKey: 'synthetic-us1', token: 'synthetic-token' }) };
+    parameters: { send: async () => {
+      if (++reads > 1) throw new Error('parameter service unavailable');
+      return parameterResult();
     } },
     database: { send: async () => ({}) },
     fetchImpl: async () => { requests++; return { ok: true, json: async () => ({ id: 'campaign-1' }), text: async () => '' }; },
@@ -181,4 +185,79 @@ test('expired cached secret is not used when refresh fails', async () => {
   clock = 60000;
   assert.equal((await handler({ ...event, id: 'article-2' })).statusCode, 502);
   assert.equal(requests, 3);
+});
+test('requests exactly the two configured parameters with decryption and matches results by name', async () => {
+  let reads = 0;
+  const handler = createHandler({ env,
+    parameters: { send: async command => {
+      reads++;
+      assert.equal(command.constructor.name, 'GetParametersCommand');
+      assert.deepEqual(command.input, { Names: [env.API_KEY_PARAMETER_NAME, env.TOKEN_PARAMETER_NAME], WithDecryption: true });
+      return parameterResult(); // Deliberately reversed relative to request order.
+    } },
+    database: { send: async () => ({}) },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ id: 'campaign-1' }), text: async () => '' }),
+  });
+  assert.equal((await handler(event)).statusCode, 200);
+  assert.equal(reads, 1);
+});
+test('partial, invalid, plaintext, duplicate and unexpected SSM results fail closed', async () => {
+  const valid = parameterResult();
+  const responses = [
+    {}, { Parameters: valid.Parameters.slice(0, 1) },
+    { ...valid, InvalidParameters: [env.API_KEY_PARAMETER_NAME] },
+    { Parameters: valid.Parameters.map(p => ({ ...p, Type: 'String' })) },
+    { Parameters: [valid.Parameters[0], valid.Parameters[0]] },
+    { Parameters: [valid.Parameters[0], { ...valid.Parameters[1], Name: '/other/api-key' }] },
+    parameterResult('synthetic-us1', ''),
+    { Parameters: valid.Parameters.map(p => ({ ...p, Value: undefined })) },
+  ];
+  for (const value of responses) {
+    let writes = 0, requests = 0;
+    const handler = createHandler({ env,
+      parameters: { send: async () => value },
+      database: { send: async () => { writes++; } },
+      fetchImpl: async () => { requests++; },
+    });
+    assert.equal((await handler(event)).statusCode, 502);
+    assert.equal(writes, 0);
+    assert.equal(requests, 0);
+  }
+});
+test('invalid or identical parameter names fail before any SSM read', async () => {
+  for (const config of [
+    { API_KEY_PARAMETER_NAME: '' }, { TOKEN_PARAMETER_NAME: 'relative' },
+    { TOKEN_PARAMETER_NAME: env.API_KEY_PARAMETER_NAME }, { TOKEN_PARAMETER_NAME: '/wildcard/*' },
+  ]) {
+    let reads = 0;
+    const handler = createHandler({ env: { ...env, ...config },
+      parameters: { send: async () => { reads++; return parameterResult(); } },
+      database: { send: async () => ({}) },
+    });
+    assert.equal((await handler(event)).statusCode, 502);
+    assert.equal(reads, 0);
+  }
+});
+test('partial refresh never combines a new parameter with an expired cached value', async () => {
+  let clock = 0, reads = 0;
+  const handler = createHandler({ env, now: () => clock,
+    parameters: { send: async () => ++reads === 1 ? parameterResult() : { Parameters: parameterResult().Parameters.slice(0, 1) } },
+    database: { send: async () => { throw new Error('must not write'); } },
+  });
+  assert.equal((await handler({ ...event, token: 'wrong' })).statusCode, 403);
+  clock = 60000;
+  assert.equal((await handler(event)).statusCode, 502);
+  assert.equal(reads, 2);
+});
+test('complete refreshed pair replaces the expired pair after rotation', async () => {
+  let clock = 0, reads = 0;
+  const handler = createHandler({ env: { ...env, SEND_ENABLED: 'false' }, now: () => clock,
+    parameters: { send: async () => ++reads === 1 ? parameterResult() : parameterResult('rotated-us1', 'rotated-token') },
+    database: { send: async () => { throw new Error('must not write'); } },
+  });
+  assert.equal((await handler(event)).statusCode, 503);
+  clock = 60000;
+  assert.equal((await handler(event)).statusCode, 403);
+  assert.equal((await handler({ ...event, token: 'rotated-token' })).statusCode, 503);
+  assert.equal(reads, 2);
 });

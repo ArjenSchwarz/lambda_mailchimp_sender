@@ -8,6 +8,7 @@
 - Parameterized SAM infrastructure, scoped runtime permissions, and owner rollout guidance.
 
 ### Changed
+- Condense the README to purpose, setup, usage and essential operating instructions.
 - Target Node.js 24 and bundle pinned AWS SDK v3 SSM and DynamoDB dependencies.
 - Use the default AWS-managed aws/ssm key and exact parameter-scoped reads without an additional KMS grant.
 - Await and check campaign creation, template assignment, and send acceptance.

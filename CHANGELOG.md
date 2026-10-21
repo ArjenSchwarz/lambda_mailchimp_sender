@@ -12,9 +12,10 @@
 - Use the default AWS-managed aws/ssm key and exact parameter-scoped reads without an additional KMS grant.
 - Await and check campaign creation, template assignment, and send acceptance.
 - Accept direct events and API proxy JSON with optional stable article identifiers.
-- Keep sending disabled by default and gate legacy uploads behind coordinated owner rollout.
-- Publish Node 24 artifacts separately from the legacy latest release.
+- Keep sending disabled by default.
 
 ### Fixed
 - Prevent duplicate campaign attempts after concurrent invocations or uncertain failures.
-- Correct legacy publisher YAML step mappings and include runtime dependencies in its ZIP.
+
+### Removed
+- Obsolete Wercker build, release and Lambda deployment configuration.

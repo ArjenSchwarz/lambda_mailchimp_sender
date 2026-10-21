@@ -11,15 +11,6 @@ Use Node.js 24 (`nvm use`) and `npm ci --ignore-scripts`. Run `npm test`,
 network boundaries and use synthetic values only. Never use the real sender as a
 test. `sam build --use-container` produces the Linux deployment artifact when
 Docker is available; inspect it for `index.js` and both pinned AWS SDK packages.
-The legacy Wercker artifact publisher includes Node 24 dependencies in its ZIP
-and uses a separate `node24` release instead of overwriting `latest`, whose
-consumers may still expect the old runtime contract. The legacy Lambda deployment
-pipeline fails closed unless the owner deliberately sets
-`MAILCHIMP_COORDINATED_DEPLOY=true` after coordinating runtime, configuration,
-claims, IAM and publisher cutover. It is a code-upload path only: it does not
-apply this SAM template or upgrade runtime/configuration. Leave it disabled
-unless that separate rollout has been completed. No release or deployment was
-performed for this update.
 
 Node 24 is the latest generally available Lambda Node LTS runtime as checked on
 2026-10-19; AWS lists Node 26 as preview. AWS SDK v3 SSM and DynamoDB

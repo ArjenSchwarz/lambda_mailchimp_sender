@@ -1,0 +1,34 @@
+[
+  {
+    "ParameterKey": "ApiKeyParameterName",
+    "ParameterValue": "/mailchimpsender/api-key"
+  },
+  {
+    "ParameterKey": "TokenParameterName",
+    "ParameterValue": "/mailchimpsender/token"
+  },
+  {
+    "ParameterKey": "MailchimpHostname",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "ListId",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "TemplateId",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "SenderName",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "ReplyTo",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "SendEnabled",
+    "ParameterValue": "false"
+  }
+]

@@ -84,10 +84,10 @@ Resources:
   Sender:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: .
+      CodeUri: ../code/
       Handler: index.handler
       Runtime: nodejs24.x
-      Architectures: [x86_64]
+      Architectures: [arm64]
       MemorySize: 128
       Timeout: 60
       LoggingConfig:

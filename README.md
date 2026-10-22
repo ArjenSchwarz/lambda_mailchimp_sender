@@ -8,6 +8,8 @@ Lambda does not fetch RSS feeds itself.
 ## Setup
 
 Requires Node.js 24, AWS SAM CLI, and a Mailchimp audience and saved template.
+The Lambda runs on ARM64. Source, dependencies and tests are in `code/`;
+infrastructure is in `templates/`.
 
 Create these two Parameter Store parameters in the Lambda's account and region.
 Use **Standard** tier, **SecureString** type and the default **`alias/aws/ssm`** key.
@@ -18,7 +20,7 @@ Store each value as a raw string, not JSON; keep credentials out of source and l
 | `/mailchimpsender/api-key` | Mailchimp API key |
 | `/mailchimpsender/token` | Nonempty token shared with the publisher |
 
-Configure [template.yaml](template.yaml) with:
+Configure [templates/sender.yaml](templates/sender.yaml) with:
 
 | SAM input | Value |
 | --- | --- |
@@ -28,11 +30,19 @@ Configure [template.yaml](template.yaml) with:
 | `SenderName`, `ReplyTo` | Campaign sender name and reply address |
 | `SendEnabled` | Defaults to `false`; set to `true` when ready to send |
 
-Build with `sam build --use-container` (requires Docker), then deploy with
-`sam deploy --guided`. SAM creates the function, API, runtime role, logs and
+Fill the empty campaign settings in [parameters/sender.json](parameters/sender.json)
+before deployment. It uses Fog's `ParameterKey`/`ParameterValue` array format;
+[tags/sender.json](tags/sender.json) uses its `Key`/`Value` format.
+
+Build with `sam build --template-file templates/sender.yaml --use-container`
+(requires Docker), then deploy with
+`sam deploy --guided`, entering the SAM inputs when prompted. For Fog, use a
+SAM-packaged template with the parameter
+and tag files; local `CodeUri` paths must be packaged before CloudFormation use.
+SAM creates the function, API, runtime role, logs and
 retained DynamoDB claims table; it does not create the credential parameters.
-For an existing installation, review the change set and coordinate the publisher
-cutover: this template does not import existing resources automatically. Avoid
+For an existing installation, preserve stack identity and claim history, review
+the change set and coordinate the publisher cutover: this template does not import existing resources automatically. Avoid
 running old and new senders for the same article.
 
 ## Usage
@@ -72,10 +82,10 @@ two parameters is not atomic.
 
 ```sh
 nvm use
-npm ci --ignore-scripts
-npm test
-npm run check
-sam validate --lint
+npm --prefix code ci --ignore-scripts
+npm --prefix code test
+npm --prefix code run check
+sam validate --lint --template-file templates/sender.yaml
 ```
 
 Tests use mocked AWS and Mailchimp clients with synthetic inputs. Do not use a

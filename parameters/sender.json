@@ -9,23 +9,23 @@
   },
   {
     "ParameterKey": "MailchimpHostname",
-    "ParameterValue": ""
+    "ParameterValue": "us14.api.mailchimp.com"
   },
   {
     "ParameterKey": "ListId",
-    "ParameterValue": ""
+    "ParameterValue": "8fad3fb827"
   },
   {
     "ParameterKey": "TemplateId",
-    "ParameterValue": ""
+    "ParameterValue": "34345"
   },
   {
     "ParameterKey": "SenderName",
-    "ParameterValue": ""
+    "ParameterValue": "ig.nore.me"
   },
   {
     "ParameterKey": "ReplyTo",
-    "ParameterValue": ""
+    "ParameterValue": "info@ig.nore.me"
   },
   {
     "ParameterKey": "SendEnabled",

@@ -9,6 +9,7 @@
 - Parameterized SAM infrastructure, scoped runtime permissions, and owner rollout guidance.
 
 ### Changed
+- Populate sender parameters with the configured blog audience and sender settings.
 - Prefer ARM64 and organize application files under code/ and infrastructure under templates/.
 - Condense the README to purpose, setup, usage and essential operating instructions.
 - Target Node.js 24 and bundle pinned AWS SDK v3 SSM and DynamoDB dependencies.

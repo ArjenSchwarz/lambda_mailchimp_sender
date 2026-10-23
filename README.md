@@ -30,7 +30,7 @@ Configure [templates/sender.yaml](templates/sender.yaml) with:
 | `SenderName`, `ReplyTo` | Campaign sender name and reply address |
 | `SendEnabled` | Defaults to `false`; set to `true` when ready to send |
 
-Fill the empty campaign settings in [parameters/sender.json](parameters/sender.json)
+Review the campaign settings in [parameters/sender.json](parameters/sender.json)
 before deployment. It uses Fog's `ParameterKey`/`ParameterValue` array format;
 [tags/sender.json](tags/sender.json) uses its `Key`/`Value` format.
 

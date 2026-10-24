@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Mailchimp sender with runtime SecureString parameter retrieval and durable duplicate protection
+Parameters:
+  ApiKeyParameterName:
+    Type: String
+    Default: /mailchimpsender/api-key
+    Description: Existing standard SecureString parameter using default aws/ssm key
+    AllowedPattern: '/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*'
+  TokenParameterName:
+    Type: String
+    Default: /mailchimpsender/token
+    Description: Existing standard SecureString parameter using default aws/ssm key
+    AllowedPattern: '/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*'
+  MailchimpHostname:
+    Type: String
+    AllowedPattern: 'us[0-9]+\.api\.mailchimp\.com'
+  ListId:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+  TemplateId:
+    Type: String
+    AllowedPattern: '[1-9][0-9]*'
+  SenderName:
+    Type: String
+    MinLength: 1
+  ReplyTo:
+    Type: String
+    MinLength: 1
+  SendEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+Resources:
+  Claims:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+  SenderLogs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 30
+  SenderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SenderResources
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+                - Effect: Allow
+                  Action: ssm:GetParameters
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParameterName}'
+                    - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TokenParameterName}'
+                - Effect: Allow
+                  Action: [dynamodb:PutItem, dynamodb:UpdateItem]
+                  Resource: !GetAtt Claims.Arn
+                - Effect: Allow
+                  Action: [logs:CreateLogStream, logs:PutLogEvents]
+                  Resource: !GetAtt SenderLogs.Arn
+  Sender:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../code/
+      Handler: index.handler
+      Runtime: nodejs24.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 60
+      LoggingConfig:
+        LogFormat: JSON
+        LogGroup: !Ref SenderLogs
+      Environment:
+        Variables:
+          API_KEY_PARAMETER_NAME: !Ref ApiKeyParameterName
+          TOKEN_PARAMETER_NAME: !Ref TokenParameterName
+          IDEMPOTENCY_TABLE: !Ref Claims
+          HOSTNAME: !Ref MailchimpHostname
+          LIST_ID: !Ref ListId
+          TEMPLATE_ID: !Ref TemplateId
+          SENDER_NAME: !Ref SenderName
+          REPLY_TO: !Ref ReplyTo
+          SEND_ENABLED: !Ref SendEnabled
+      Role: !GetAtt SenderRole.Arn
+      Events:
+        SendCampaign:
+          Type: Api
+          Properties:
+            Method: POST
+            Path: /mailchimpsender
+Outputs:
+  FunctionArn:
+    Value: !GetAtt Sender.Arn
+  ClaimsTable:
+    Value: !Ref Claims
+  Endpoint:
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/mailchimpsender'

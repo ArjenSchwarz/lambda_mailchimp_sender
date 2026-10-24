@@ -1,0 +1,34 @@
+[
+  {
+    "ParameterKey": "ApiKeyParameterName",
+    "ParameterValue": "/mailchimpsender/api-key"
+  },
+  {
+    "ParameterKey": "TokenParameterName",
+    "ParameterValue": "/mailchimpsender/token"
+  },
+  {
+    "ParameterKey": "MailchimpHostname",
+    "ParameterValue": "us14.api.mailchimp.com"
+  },
+  {
+    "ParameterKey": "ListId",
+    "ParameterValue": "8fad3fb827"
+  },
+  {
+    "ParameterKey": "TemplateId",
+    "ParameterValue": "34345"
+  },
+  {
+    "ParameterKey": "SenderName",
+    "ParameterValue": "ig.nore.me"
+  },
+  {
+    "ParameterKey": "ReplyTo",
+    "ParameterValue": "info@ig.nore.me"
+  },
+  {
+    "ParameterKey": "SendEnabled",
+    "ParameterValue": "false"
+  }
+]

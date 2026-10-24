@@ -1,40 +1,92 @@
-# Mailchimp sender Lambda function
+# Mailchimp sender Lambda
 
-Function for automatically triggering an email from Mailchimp based on an RSS feed.
+Send a Mailchimp campaign when an article is published, without waiting for a
+scheduled RSS campaign. The Lambda creates a regular campaign, applies a saved
+Mailchimp template and requests a send. The template supplies the content; the
+Lambda does not fetch RSS feeds itself.
 
-> Note: This function doesn't check the RSS feed itself, that needs to be handled separately.
+## Setup
 
-## How does it work?
+Requires Node.js 24, AWS SAM CLI, and a Mailchimp audience and saved template.
+The Lambda runs on ARM64. Source, dependencies and tests are in `code/`;
+infrastructure is in `templates/`.
 
-When triggered, the function will create a campaign in Mailchimp for a defined mailing list. It will then assign a template to the campaign, and afterwards trigger a send action.
+Create these two Parameter Store parameters in the Lambda's account and region.
+Use **Standard** tier, **SecureString** type and the default **`alias/aws/ssm`** key.
+Store each value as a raw string, not JSON; keep credentials out of source and logs.
 
-The entire process assumes that the template assigned will read its data from an RSS feed, as otherwise it will only try to send the same email over and over again. You will also need to provide the title/subject of the email when you trigger it.
+| Default parameter name | Value |
+| --- | --- |
+| `/mailchimpsender/api-key` | Mailchimp API key |
+| `/mailchimpsender/token` | Nonempty token shared with the publisher |
 
-## Why?
+Configure [templates/sender.yaml](templates/sender.yaml) with:
 
-Mailchimp has built-in functionalities for RSS feeds. However, these will only send an email once a day (or week/month) at a set time. As I only post infrequently (usually once or twice a week), making people wait for the email for a day because I posted it a little later than usual is silly. Therefore I use this to trigger the email immediately after the article is available.
+| SAM input | Value |
+| --- | --- |
+| `ApiKeyParameterName`, `TokenParameterName` | The two distinct parameter paths above, or your own absolute paths |
+| `MailchimpHostname` | API hostname, such as `us1.api.mailchimp.com`; must match the API key's data-center suffix |
+| `ListId`, `TemplateId` | Audience ID and saved template ID |
+| `SenderName`, `ReplyTo` | Campaign sender name and reply address |
+| `SendEnabled` | Defaults to `false`; set to `true` when ready to send |
 
-## Configuration
+Review the campaign settings in [parameters/sender.json](parameters/sender.json)
+before deployment. It uses Fog's `ParameterKey`/`ParameterValue` array format;
+[tags/sender.json](tags/sender.json) uses its `Key`/`Value` format.
 
-The code for the function is simple, and has no external dependencies so you can copy-paste it in if you want or add it to a zip file.
+Build with `sam build --template-file templates/sender.yaml --use-container`
+(requires Docker), then deploy with
+`sam deploy --guided`, entering the SAM inputs when prompted. For Fog, use a
+SAM-packaged template with the parameter
+and tag files; local `CodeUri` paths must be packaged before CloudFormation use.
+SAM creates the function, API, runtime role, logs and
+retained DynamoDB claims table; it does not create the credential parameters.
+For an existing installation, preserve stack identity and claim history, review
+the change set and coordinate the publisher cutover: this template does not import existing resources automatically. Avoid
+running old and new senders for the same article.
 
-The function uses environment variables for the details, you will have to add these to your Lambda function's configuration.
+## Usage
 
-* APIKEY: Your Mailchimp API key
-* HOSTNAME: The hostname where your API calls should go to (in the form usX.api.mailchimp.com, where usX is the endpart of your API key)
-* TEMPLATE_ID: The ID of the template you want to assign to the campaign
-* LIST_ID: The ID of the recipients list
-* SENDER_NAME: The name of the sender of your campaign
-* REPLY_TO: The reply-to address of your campaign
-* TOKEN: A security token that needs to be provided (and matched) by the trigger. This is a security measure to prevent accidental or unauthorised use.
+POST JSON to the stack's `Endpoint` output, or invoke the Lambda directly with
+the same object:
 
-### Trigger
+```json
+{
+  "title": "Article subject",
+  "token": "<publisher-token>",
+  "id": "article-123"
+}
+```
 
-The trigger will need to send 2 things to the mailsender:
+For HTTP requests, use `Content-Type: application/json`. `title` and `token` are
+required. Use a stable article ID or canonical URL for `id`, and reuse it on
+retries. Without `id`, the exact title identifies the article, so repeated
+subjects are blocked.
 
-* title: The title/subject of the campaign
-* token: A security token that needs to match the value in the
+The response contains `statusCode` and a JSON `body`; direct callers must inspect
+`statusCode`. `200` means Mailchimp accepted the send request, not that delivery
+completed. `409` means the article was already claimed; `503` means sending is
+disabled.
 
-## About the code
+Claims never expire, including after failures. For an error or uncertain result,
+inspect the claim and Mailchimp campaign before recovery. Do not bypass a claim
+by changing the article ID or deleting the record. Preserve claim history when
+replacing infrastructure. Perform deliberate sends and recovery manually.
 
-It's not the best looking code, and I have no doubt that someone with more knowledge of NodeJS can do a better job. It works however, and I deliberately refrained from using anything that isn't included by default in Lambda.
+Credentials are cached for 60 seconds; failed refreshes stop processing. To
+rotate them, pause publishing and disable sending, update both parameters and
+the publisher, allow the cache interval to expire, then re-enable. Updating the
+two parameters is not atomic.
+
+## Development
+
+```sh
+nvm use
+npm --prefix code ci --ignore-scripts
+npm --prefix code test
+npm --prefix code run check
+sam validate --lint --template-file templates/sender.yaml
+```
+
+Tests use mocked AWS and Mailchimp clients with synthetic inputs. Do not use a
+live sender invocation as a test.
